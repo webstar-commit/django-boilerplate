@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: Test
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - 3.6
+          - 3.7
+          - 3.8
+          - 3.9
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macOS-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: abatilo/actions-poetry@v2.1.2
+      - name: Install Dependencies
+        run: poetry install
+      - name: Test with Pytest
+        run: poetry run pytest --cov-report=xml
+      - uses: codecov/codecov-action@v1.4.1
+
+  e2e:
+    # https://github.com/browniebroke/django-codemod/issues/302
+    name: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install Dependencies
+        run: |
+          pip install .
+          pip install 'Django>=3.0,<3.1'
+      - name: Run e2e script
+        run: ./tests/test_e2e.sh
+
+  lint:
+    name: Lint
+    strategy:
+      fail-fast: false
+      matrix:
+        linter:
+          - name: flake8
+            run: flake8
+          - name: black
+            run: black --check .
+          - name: pyupgrade
+            run: pyupgrade --py3-plus `find . -name "*.py"`
+          - name: isort
+            run: isort -c -v .
+          - name: mypy
+            run: mypy .
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - uses: abatilo/actions-poetry@v2.1.2
+      - name: Install Dependencies
+        run: poetry install
+      - name: ${{ matrix.linter.name }}
+        run: poetry run ${{ matrix.linter.run }}
+
+  # Make sure commit messages follow the conventional commits convention:
+  # https://www.conventionalcommits.org
+  commitlint:
+    name: Lint Commit Messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v3.1.0
+
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    if: github.ref == 'refs/heads/main'
+    needs:
+      - test
+      - e2e
+      - lint
+      - commitlint
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # Run semantic release:
+      # - Update CHANGELOG.md
+      # - Update version in code
+      # - Create git tag
+      # - Create Github release
+      # - Publish to PyPI
+      - name: Python Semantic Release
+        uses: relekang/python-semantic-release@v7.15.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pypi_token: ${{ secrets.PYPI_TOKEN }}
